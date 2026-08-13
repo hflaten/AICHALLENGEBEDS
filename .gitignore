@@ -6,7 +6,6 @@ node_modules/
 out/
 dist/
 *.tsbuildinfo
-vercel.json
 .vercel/
 .herenow/
 .agents/
