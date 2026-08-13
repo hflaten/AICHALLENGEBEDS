@@ -42,7 +42,7 @@ export async function POST(request: Request) {
       match_count: Math.max(parsed.data.matchCount * 2, 12),
     });
 
-    if (uploadedDocumentsError) {
+    if (uploadedDocumentsError && !isMissingUploadSchemaError(uploadedDocumentsError.message)) {
       return Response.json({ error: uploadedDocumentsError.message }, { status: 500 });
     }
 
@@ -58,7 +58,7 @@ export async function POST(request: Request) {
 
     const matches = (data || []) as LeadMatch[];
     const documents = (documentsData || []) as RagDocumentEvidence[];
-    const uploadedDocuments = (uploadedDocumentsData || []) as UploadedDocumentEvidence[];
+    const uploadedDocuments = uploadedDocumentsError ? [] : ((uploadedDocumentsData || []) as UploadedDocumentEvidence[]);
 
     if (matches.length === 0 && documents.length === 0 && uploadedDocuments.length === 0) {
       return Response.json({
@@ -128,4 +128,12 @@ export async function POST(request: Request) {
 
 function getErrorMessage(caught: unknown) {
   return caught instanceof Error ? caught.message : "Unexpected lead search API error.";
+}
+
+function isMissingUploadSchemaError(message: string) {
+  return (
+    message.includes("match_document_chunks") ||
+    message.includes("document_chunks") ||
+    message.includes("ingestion_runs")
+  );
 }

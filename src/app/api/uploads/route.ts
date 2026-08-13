@@ -20,6 +20,17 @@ export async function GET() {
       .order("created_at", { ascending: false })
       .limit(8);
 
+    if (error && isMissingUploadSchemaError(error.message)) {
+      return Response.json({
+        runs: [],
+        stats: {
+          companies: 0,
+          chunks: 0,
+        },
+        warning: "Upload schema has not been applied in Supabase yet.",
+      });
+    }
+
     if (error) {
       return Response.json({ error: error.message }, { status: 500 });
     }
@@ -254,4 +265,13 @@ function sanitizeFileName(fileName: string) {
 
 function getErrorMessage(caught: unknown) {
   return caught instanceof Error ? caught.message : "Unexpected upload ingestion API error.";
+}
+
+function isMissingUploadSchemaError(message: string) {
+  return (
+    message.includes("ingestion_runs") ||
+    message.includes("source_documents") ||
+    message.includes("document_chunks") ||
+    message.includes("schema cache")
+  );
 }
