@@ -39,11 +39,27 @@ export async function parseUploadedFile(file: File): Promise<ParsedUpload> {
 }
 
 async function parsePdf(buffer: Buffer) {
+  await ensurePdfDomPolyfills();
   const { PDFParse } = await import("pdf-parse");
   const parser = new PDFParse({ data: buffer });
   const parsed = await parser.getText();
   await parser.destroy();
   return [{ label: "PDF text", text: parsed.text || "" }];
+}
+
+async function ensurePdfDomPolyfills() {
+  const globals = globalThis as Record<string, unknown>;
+
+  if (globals["DOMMatrix"] && globals["DOMPoint"] && globals["DOMRect"] && globals["Path2D"]) {
+    return;
+  }
+
+  const canvas = await import("@napi-rs/canvas");
+  globals["DOMMatrix"] ||= canvas.DOMMatrix as unknown;
+  globals["DOMPoint"] ||= canvas.DOMPoint as unknown;
+  globals["DOMRect"] ||= canvas.DOMRect as unknown;
+  globals["ImageData"] ||= canvas.ImageData as unknown;
+  globals["Path2D"] ||= canvas.Path2D as unknown;
 }
 
 async function parseOfficeXml(buffer: Buffer, xmlPath: string, label: string) {
