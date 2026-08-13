@@ -40,8 +40,14 @@ export async function parseUploadedFile(file: File): Promise<ParsedUpload> {
 
 async function parsePdf(buffer: Buffer) {
   await ensurePdfDomPolyfills();
-  const { PDFParse } = await import("pdf-parse");
-  const parser = new PDFParse({ data: buffer });
+  const [{ PDFParse }, { getData }] = await Promise.all([import("pdf-parse"), import("pdf-parse/worker")]);
+  PDFParse.setWorker(getData());
+  const parser = new PDFParse({
+    data: buffer,
+    disableFontFace: true,
+    isEvalSupported: false,
+    useWorkerFetch: false,
+  });
   const parsed = await parser.getText();
   await parser.destroy();
   return [{ label: "PDF text", text: parsed.text || "" }];
