@@ -14,6 +14,29 @@ type ResponsesResponse = {
   error?: { message?: string };
 };
 
+type ExtractedProjectKnowledgeResponse = {
+  companies: Array<{
+    name: string;
+    website?: string | null;
+    industry?: string | null;
+    region?: string | null;
+    company_size?: string | null;
+    revenue_range?: string | null;
+    description: string;
+    pain_points?: string[];
+    buying_signals?: string[];
+    services_fit?: string[];
+    contact_name?: string | null;
+    contact_title?: string | null;
+    contact_email?: string | null;
+    source?: string | null;
+    confidence: "low" | "medium" | "high";
+    evidence?: string[];
+  }>;
+  project_title: string | null;
+  project_summary: string;
+};
+
 const OPENAI_API_BASE = "https://api.openai.com/v1";
 const EMBEDDING_DIMENSIONS = 1536;
 
@@ -142,6 +165,136 @@ export async function createLeadBrief({
   }
 
   return extractResponseText(payload);
+}
+
+export async function extractProjectKnowledge({
+  fileName,
+  text,
+}: {
+  fileName: string;
+  text: string;
+}): Promise<ExtractedProjectKnowledgeResponse> {
+  const settings = getOpenAISettings();
+
+  if (!settings.apiKey) {
+    throw new Error("OPENAI_API_KEY is not configured.");
+  }
+
+  const response = await fetch(`${OPENAI_API_BASE}/responses`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${settings.apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: settings.model,
+      reasoning: {
+        effort: settings.reasoningEffort,
+      },
+      text: {
+        format: {
+          type: "json_schema",
+          name: "project_knowledge_extraction",
+          strict: true,
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            required: ["companies", "project_title", "project_summary"],
+            properties: {
+              project_title: { type: ["string", "null"] },
+              project_summary: { type: "string" },
+              companies: {
+                type: "array",
+                maxItems: 12,
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: [
+                    "name",
+                    "website",
+                    "industry",
+                    "region",
+                    "company_size",
+                    "revenue_range",
+                    "description",
+                    "pain_points",
+                    "buying_signals",
+                    "services_fit",
+                    "contact_name",
+                    "contact_title",
+                    "contact_email",
+                    "source",
+                    "confidence",
+                    "evidence",
+                  ],
+                  properties: {
+                    name: { type: "string" },
+                    website: { type: ["string", "null"] },
+                    industry: { type: ["string", "null"] },
+                    region: { type: ["string", "null"] },
+                    company_size: { type: ["string", "null"] },
+                    revenue_range: { type: ["string", "null"] },
+                    description: { type: "string" },
+                    pain_points: { type: "array", items: { type: "string" }, maxItems: 12 },
+                    buying_signals: { type: "array", items: { type: "string" }, maxItems: 12 },
+                    services_fit: { type: "array", items: { type: "string" }, maxItems: 12 },
+                    contact_name: { type: ["string", "null"] },
+                    contact_title: { type: ["string", "null"] },
+                    contact_email: { type: ["string", "null"] },
+                    source: { type: ["string", "null"] },
+                    confidence: { type: "string", enum: ["low", "medium", "high"] },
+                    evidence: { type: "array", items: { type: "string" }, maxItems: 8 },
+                  },
+                },
+              },
+            },
+          },
+        },
+        verbosity: "low",
+      },
+      input: [
+        {
+          role: "developer",
+          content: [
+            {
+              type: "input_text",
+              text: [
+                "Extract reusable KPMG lead-generation knowledge from uploaded prior project material.",
+                "Use only facts present in the document text.",
+                "Create company summaries that match the lead_companies database shape.",
+                "Buying signals should be concrete evidence from the project material, not generic sales claims.",
+                "Services fit should name consultancy services KPMG could plausibly offer based on the text.",
+                "If a field is not present, use null or an empty array. Do not invent contact details, revenue, size, website, or dates.",
+              ].join("\n"),
+            },
+          ],
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: `File name: ${fileName}\n\nDocument text:\n${text.slice(0, 80_000)}`,
+            },
+          ],
+        },
+      ],
+    }),
+  });
+
+  const payload = (await response.json()) as ResponsesResponse;
+
+  if (!response.ok) {
+    throw new Error(payload.error?.message || "OpenAI project extraction request failed.");
+  }
+
+  const textOutput = extractResponseText(payload);
+
+  try {
+    return JSON.parse(textOutput) as ExtractedProjectKnowledgeResponse;
+  } catch {
+    throw new Error("OpenAI extraction did not return valid structured JSON.");
+  }
 }
 
 function extractResponseText(payload: ResponsesResponse) {

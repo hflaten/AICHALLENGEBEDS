@@ -1,8 +1,7 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
-import type { LeadCompany, LeadMatch, LeadSearchResult } from "@/lib/leads/types";
-import { splitList } from "@/lib/leads/format";
+import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import type { LeadCompany, LeadMatch, LeadSearchResult, UploadedDocumentEvidence } from "@/lib/leads/types";
 
 type RuntimeStatus = {
   aiReady: boolean;
@@ -12,74 +11,50 @@ type RuntimeStatus = {
   supabaseReady: boolean;
 };
 
-type CompanyFormState = {
-  name: string;
-  website: string;
-  industry: string;
-  region: string;
-  company_size: string;
-  revenue_range: string;
-  description: string;
-  pain_points: string;
-  buying_signals: string;
-  services_fit: string;
-  contact_name: string;
-  contact_title: string;
-  contact_email: string;
-  source: string;
+type UploadRun = {
+  id: string;
+  created_at: string;
+  status: "processing" | "completed" | "failed";
+  file_name: string;
+  content_type: string | null;
+  file_size: number | null;
+  project_title: string | null;
+  project_summary: string | null;
+  chunk_count: number;
+  company_count: number;
+  error_message: string | null;
 };
 
-const emptyCompany: CompanyFormState = {
-  name: "",
-  website: "",
-  industry: "",
-  region: "",
-  company_size: "",
-  revenue_range: "",
-  description: "",
-  pain_points: "",
-  buying_signals: "",
-  services_fit: "",
-  contact_name: "",
-  contact_title: "",
-  contact_email: "",
-  source: "",
+type UploadStats = {
+  chunks: number;
+  companies: number;
 };
+
+const defaultRequest =
+  "Find shipping companies with regulatory pressure, ownership change, leadership change, financial stress, or technology transformation needs where KPMG has a strong advisory fit.";
 
 export function LeadWorkbench({ status }: { status: RuntimeStatus }) {
-  const [companyForm, setCompanyForm] = useState<CompanyFormState>({
-    ...emptyCompany,
-    name: "Nordic Grid Systems",
-    website: "https://example.com",
-    industry: "Energy infrastructure",
-    region: "Nordics",
-    company_size: "1,000-5,000 employees",
-    revenue_range: "EUR 250M-1B",
-    description:
-      "Regional grid operator modernizing asset maintenance, reporting, and regulatory data workflows across several markets.",
-    pain_points: "Legacy ERP landscape\nManual regulatory reporting\nCyber resilience gaps",
-    buying_signals: "New transformation office\nHiring data governance roles\nUpcoming compliance deadline",
-    services_fit: "Technology transformation\nCyber security\nESG and regulatory reporting",
-    contact_title: "Chief Transformation Officer",
-    source: "Manual research",
-  });
-  const [companies, setCompanies] = useState<LeadCompany[]>([]);
-  const [request, setRequest] = useState(
-    "Find Nordic mid-market companies with regulatory pressure, legacy systems, and a strong fit for KPMG technology transformation.",
-  );
+  const [request, setRequest] = useState(defaultRequest);
   const [result, setResult] = useState<LeadSearchResult | null>(null);
-  const [isSaving, setIsSaving] = useState(false);
-  const [isSeeding, setIsSeeding] = useState(false);
+  const [companies, setCompanies] = useState<LeadCompany[]>([]);
+  const [runs, setRuns] = useState<UploadRun[]>([]);
+  const [stats, setStats] = useState<UploadStats>({ chunks: 0, companies: 0 });
+  const [isDragging, setIsDragging] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const canUseRag = status.ragReady;
-  const canSave = useMemo(
-    () => companyForm.name.trim().length > 0 && companyForm.description.trim().length >= 20 && !isSaving,
-    [companyForm.description, companyForm.name, isSaving],
-  );
-  const canSearch = useMemo(() => request.trim().length >= 8 && !isSearching, [isSearching, request]);
+  const canSearch = useMemo(() => request.trim().length >= 8 && !isSearching && status.ragReady, [
+    isSearching,
+    request,
+    status.ragReady,
+  ]);
+
+  async function refreshKnowledge() {
+    await Promise.all([loadCompanies(), loadUploads()]);
+  }
 
   async function loadCompanies() {
     if (!status.supabaseReady) return;
@@ -94,70 +69,24 @@ export function LeadWorkbench({ status }: { status: RuntimeStatus }) {
     }
   }
 
-  async function saveCompany(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!canSave) return;
-
-    setIsSaving(true);
-    setError(null);
-    setMessage(null);
+  async function loadUploads() {
+    if (!status.supabaseReady) return;
 
     try {
-      const response = await fetch("/api/companies", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...companyForm,
-          pain_points: splitList(companyForm.pain_points),
-          buying_signals: splitList(companyForm.buying_signals),
-          services_fit: splitList(companyForm.services_fit),
-        }),
-      });
-      const payload = (await response.json()) as { company?: LeadCompany; error?: string };
-      if (!response.ok || !payload.company) throw new Error(payload.error || "Company save failed.");
-      setCompanies((current) => [payload.company as LeadCompany, ...current].slice(0, 12));
-      setCompanyForm(emptyCompany);
-      setMessage(`${payload.company.name} was added and embedded for RAG search.`);
+      const response = await fetch("/api/uploads");
+      const payload = (await response.json()) as { runs?: UploadRun[]; stats?: UploadStats; error?: string };
+      if (!response.ok) throw new Error(payload.error || "Could not load uploads.");
+      setRuns(payload.runs || []);
+      setStats(payload.stats || { chunks: 0, companies: 0 });
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Company save failed.");
-    } finally {
-      setIsSaving(false);
+      setError(caught instanceof Error ? caught.message : "Could not load uploads.");
     }
   }
 
-  async function seedKpmRagCorpus() {
-    if (!canUseRag || isSeeding) return;
-
-    setIsSeeding(true);
-    setError(null);
-    setMessage(null);
-
-    try {
-      const response = await fetch("/api/rag/seed", {
-        method: "POST",
-      });
-      const payload = (await response.json()) as {
-        companies?: number;
-        count?: number;
-        error?: string;
-        productionRecords?: number;
-        syntheticRecords?: number;
-        verifiedRecords?: number;
-      };
-      if (!response.ok || typeof payload.count !== "number" || typeof payload.companies !== "number") {
-        throw new Error(payload.error || "KPMG RAG corpus import failed.");
-      }
-
-      setMessage(
-        `${payload.count} RAG records and ${payload.companies} company summaries were embedded. ${payload.verifiedRecords || 0} verified, ${payload.productionRecords || 0} production, ${payload.syntheticRecords || 0} synthetic.`,
-      );
-      await loadCompanies();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "KPMG RAG corpus import failed.");
-    } finally {
-      setIsSeeding(false);
-    }
-  }
+  useEffect(() => {
+    void refreshKnowledge();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function searchLeads(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -171,7 +100,7 @@ export function LeadWorkbench({ status }: { status: RuntimeStatus }) {
       const response = await fetch("/api/leads/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ request, matchCount: 6, matchThreshold: 0.25 }),
+        body: JSON.stringify({ request, matchCount: 8, matchThreshold: 0.22 }),
       });
       const payload = (await response.json()) as { result?: LeadSearchResult; error?: string };
       if (!response.ok || !payload.result) throw new Error(payload.error || "Lead search failed.");
@@ -183,226 +112,297 @@ export function LeadWorkbench({ status }: { status: RuntimeStatus }) {
     }
   }
 
-  return (
-    <div className="grid flex-1 gap-5 py-5 xl:grid-cols-[420px_minmax(0,1fr)]">
-      <section className="rounded-md border border-[var(--line)] bg-[var(--panel)]">
-        <div className="border-b border-[var(--line)] p-4">
-          <h2 className="text-lg font-semibold">Company intake</h2>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            Add target accounts and buying context to the Supabase vector store.
-          </p>
-        </div>
-        <div className="border-b border-[var(--line)] p-4">
-          <button
-            type="button"
-            disabled={!canUseRag || isSeeding}
-            onClick={() => void seedKpmRagCorpus()}
-            className="h-10 w-full rounded-md border border-[var(--accent)] px-4 font-medium text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isSeeding ? "Embedding KPMG corpus..." : "Load KPMG RAG corpus"}
-          </button>
-        </div>
-        <form onSubmit={saveCompany} className="space-y-3 p-4">
-          <Field label="Company" value={companyForm.name} onChange={(value) => updateCompany("name", value)} required />
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Website" value={companyForm.website} onChange={(value) => updateCompany("website", value)} />
-            <Field label="Industry" value={companyForm.industry} onChange={(value) => updateCompany("industry", value)} />
-            <Field label="Region" value={companyForm.region} onChange={(value) => updateCompany("region", value)} />
-            <Field label="Size" value={companyForm.company_size} onChange={(value) => updateCompany("company_size", value)} />
-          </div>
-          <Field
-            label="Revenue"
-            value={companyForm.revenue_range}
-            onChange={(value) => updateCompany("revenue_range", value)}
-          />
-          <TextArea
-            label="Account description"
-            value={companyForm.description}
-            onChange={(value) => updateCompany("description", value)}
-            rows={4}
-            required
-          />
-          <TextArea
-            label="Pain points"
-            value={companyForm.pain_points}
-            onChange={(value) => updateCompany("pain_points", value)}
-            rows={3}
-          />
-          <TextArea
-            label="Buying signals"
-            value={companyForm.buying_signals}
-            onChange={(value) => updateCompany("buying_signals", value)}
-            rows={3}
-          />
-          <TextArea
-            label="KPMG service fit"
-            value={companyForm.services_fit}
-            onChange={(value) => updateCompany("services_fit", value)}
-            rows={3}
-          />
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field
-              label="Contact"
-              value={companyForm.contact_name}
-              onChange={(value) => updateCompany("contact_name", value)}
-            />
-            <Field
-              label="Title"
-              value={companyForm.contact_title}
-              onChange={(value) => updateCompany("contact_title", value)}
-            />
-          </div>
-          <Field
-            label="Email"
-            value={companyForm.contact_email}
-            onChange={(value) => updateCompany("contact_email", value)}
-          />
-          <Field label="Source" value={companyForm.source} onChange={(value) => updateCompany("source", value)} />
-          <button
-            type="submit"
-            disabled={!canSave || !canUseRag}
-            className="h-10 w-full rounded-md bg-[var(--accent)] px-4 font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isSaving ? "Embedding..." : "Add company"}
-          </button>
-        </form>
-      </section>
+  async function uploadFiles(files: FileList | File[]) {
+    const selected = Array.from(files);
+    if (!selected.length || isUploading) return;
 
+    setIsUploading(true);
+    setError(null);
+    setMessage(`Uploading ${selected.length} file${selected.length === 1 ? "" : "s"}...`);
+
+    try {
+      for (const file of selected) {
+        const formData = new FormData();
+        formData.append("file", file);
+        const response = await fetch("/api/uploads", {
+          method: "POST",
+          body: formData,
+        });
+        const payload = (await response.json()) as {
+          error?: string;
+          run?: { chunks: number; companies: number; fileName: string };
+        };
+        if (!response.ok || !payload.run) throw new Error(payload.error || `Upload failed for ${file.name}.`);
+        setMessage(`${payload.run.fileName} indexed: ${payload.run.chunks} chunks, ${payload.run.companies} companies.`);
+      }
+
+      await refreshKnowledge();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Upload failed.");
+    } finally {
+      setIsUploading(false);
+      setIsDragging(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  function handleDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setIsDragging(false);
+    void uploadFiles(event.dataTransfer.files);
+  }
+
+  function handleInputChange(event: ChangeEvent<HTMLInputElement>) {
+    if (event.target.files) void uploadFiles(event.target.files);
+  }
+
+  const displayedMatches = result?.matches.length ? result.matches : companies;
+  const uploadedEvidence = result?.uploadedDocuments || [];
+
+  return (
+    <div className="grid flex-1 gap-5 py-5 xl:grid-cols-[minmax(0,1fr)_340px]">
       <section className="flex min-h-[760px] flex-col rounded-md border border-[var(--line)] bg-[var(--panel)]">
         <div className="border-b border-[var(--line)] p-4">
-          <h2 className="text-lg font-semibold">Lead generator</h2>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            Ask for an ideal prospect profile. RAG retrieves matching companies and the AI ranks the outreach fit.
-          </p>
-        </div>
-        <div className="border-b border-[var(--line)] p-4">
-          <form onSubmit={searchLeads} className="space-y-3">
-            <TextArea label="Lead request" value={request} onChange={setRequest} rows={4} required />
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-sm">
-                {message ? <span className="text-[var(--accent)]">{message}</span> : null}
-                {error ? <span className="text-[var(--warning)]">{error}</span> : null}
-                {!message && !error ? <span className="text-[var(--muted)]">{companies.length} companies indexed</span> : null}
-              </div>
-              <button
-                type="submit"
-                disabled={!canSearch || !canUseRag}
-                className="h-10 rounded-md bg-[var(--foreground)] px-4 font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {isSearching ? "Searching..." : "Find leads"}
-              </button>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold">Lead search</h2>
+              <p className="mt-1 max-w-2xl text-sm leading-6 text-[var(--muted)]">
+                Ask for a target profile. Results are grounded in uploaded project documents, KPMG corpus records, and structured company summaries.
+              </p>
             </div>
-          </form>
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <Metric label="Companies" value={stats.companies || companies.length} />
+              <Metric label="Chunks" value={stats.chunks} />
+              <Metric label="Uploads" value={runs.length} />
+            </div>
+          </div>
         </div>
 
-        <div className="grid flex-1 gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <form onSubmit={searchLeads} className="border-b border-[var(--line)] p-4">
+          <label className="block text-sm font-medium text-[var(--muted)]">
+            Request
+            <textarea
+              required
+              rows={4}
+              value={request}
+              onChange={(event) => setRequest(event.target.value)}
+              className="mt-1 w-full resize-y rounded-md border border-[var(--line)] bg-white p-3 text-[var(--foreground)] outline-none focus:border-[var(--accent)]"
+            />
+          </label>
+          <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-h-5 text-sm">
+              {message ? <span className="text-[var(--accent)]">{message}</span> : null}
+              {error ? <span className="text-[var(--warning)]">{error}</span> : null}
+              {!message && !error ? <span className="text-[var(--muted)]">Search across saved project knowledge</span> : null}
+            </div>
+            <button
+              type="submit"
+              disabled={!canSearch}
+              className="h-10 rounded-md bg-[var(--foreground)] px-5 font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isSearching ? "Searching..." : "Find leads"}
+            </button>
+          </div>
+        </form>
+
+        <div className="grid flex-1 gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div className="min-h-96 rounded-md border border-[var(--line)] p-4">
             {result ? (
               <div>
                 <div className="mb-4 flex flex-wrap gap-2 text-xs text-[var(--muted)]">
-                  <span>{result.model}</span>
-                  <span>{result.embeddingModel}</span>
-                  <span>{result.matches.length} matches</span>
+                  <Badge>{result.model}</Badge>
+                  <Badge>{result.embeddingModel}</Badge>
+                  <Badge>{`${result.matches.length} companies`}</Badge>
+                  <Badge>{`${(result.documents?.length || 0) + uploadedEvidence.length} evidence records`}</Badge>
                 </div>
                 <div className="whitespace-pre-wrap text-sm leading-7">{result.answer}</div>
               </div>
             ) : (
               <div className="grid h-full place-items-center text-center text-sm text-[var(--muted)]">
                 <p className="max-w-md">
-                  Add companies, then describe the type of lead KPMG wants to find. Results will be grounded in the stored company records.
+                  Upload prior project files or use the existing corpus, then describe the lead profile KPMG wants to find.
                 </p>
               </div>
             )}
           </div>
 
-          <div>
+          <aside>
             <div className="flex items-center justify-between gap-3">
-              <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">Retrieved accounts</h3>
+              <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">Ranked leads</h3>
               <button
                 type="button"
                 disabled={!status.supabaseReady}
-                onClick={() => void loadCompanies()}
+                onClick={() => void refreshKnowledge()}
                 className="rounded-md border border-[var(--line)] px-2 py-1 text-xs font-medium text-[var(--muted)] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Refresh
               </button>
             </div>
             <div className="mt-3 space-y-3">
-              {(result?.matches.length ? result.matches : companies).slice(0, 6).map((company) => (
-                <article key={company.id} className="rounded-md border border-[var(--line)] p-3 text-sm">
+              {displayedMatches.slice(0, 7).map((company) => (
+                <CompanyCard key={company.id} company={company} />
+              ))}
+            </div>
+          </aside>
+        </div>
+
+        {result ? (
+          <div className="border-t border-[var(--line)] p-4">
+            <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">Source evidence</h3>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              {uploadedEvidence.slice(0, 4).map((item) => (
+                <EvidenceCard key={item.id} item={item} />
+              ))}
+              {(result.documents || []).slice(0, Math.max(0, 4 - uploadedEvidence.length)).map((item) => (
+                <article key={item.id} className="rounded-md border border-[var(--line)] p-3 text-sm">
                   <div className="flex items-start justify-between gap-3">
-                    <h4 className="font-semibold">{company.name}</h4>
-                    {hasSimilarity(company) ? (
-                      <span className="text-xs text-[var(--accent)]">{Math.round(company.similarity * 100)}%</span>
-                    ) : null}
+                    <h4 className="font-semibold">{item.company_name || item.doc_type}</h4>
+                    <span className="text-xs text-[var(--accent)]">{Math.round(item.similarity * 100)}%</span>
                   </div>
-                  <p className="mt-1 text-[var(--muted)]">{[company.industry, company.region].filter(Boolean).join(" / ")}</p>
-                  <p className="mt-2 max-h-[4.5rem] overflow-hidden text-[var(--muted)]">{company.description}</p>
+                  <p className="mt-1 text-xs text-[var(--muted)]">{[item.doc_type, item.trigger_name].filter(Boolean).join(" / ")}</p>
+                  <p className="mt-2 line-clamp-4 text-[var(--muted)]">{item.content}</p>
                 </article>
               ))}
             </div>
           </div>
-        </div>
+        ) : null}
       </section>
+
+      <aside className="space-y-5">
+        <section className="rounded-md border border-[var(--line)] bg-[var(--panel)]">
+          <div className="border-b border-[var(--line)] p-4">
+            <h2 className="text-lg font-semibold">Knowledge intake</h2>
+            <p className="mt-1 text-sm leading-6 text-[var(--muted)]">
+              Drop previous project files here. The app stores originals, extracts reusable lead knowledge, and embeds the evidence.
+            </p>
+          </div>
+          <div className="p-4">
+            <div
+              onDragOver={(event) => {
+                event.preventDefault();
+                setIsDragging(true);
+              }}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={handleDrop}
+              className={[
+                "grid min-h-44 place-items-center rounded-md border border-dashed p-5 text-center transition",
+                isDragging ? "border-[var(--accent)] bg-[#ecfdf5]" : "border-[var(--line)] bg-[#fafafa]",
+              ].join(" ")}
+            >
+              <div>
+                <div className="mx-auto grid h-10 w-10 place-items-center rounded-md border border-[var(--line)] bg-white text-lg">
+                  ↑
+                </div>
+                <p className="mt-3 text-sm font-medium">{isUploading ? "Indexing..." : "Drop files to index"}</p>
+                <p className="mt-1 text-xs leading-5 text-[var(--muted)]">PDF, DOCX, PPTX, XLSX, CSV, TXT, MD up to 12 MB</p>
+                <button
+                  type="button"
+                  disabled={isUploading || !status.ragReady}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="mt-4 h-9 rounded-md border border-[var(--accent)] px-4 text-sm font-medium text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Choose files
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept=".pdf,.docx,.pptx,.xlsx,.csv,.txt,.md,text/plain,text/csv,application/pdf"
+                  onChange={handleInputChange}
+                  className="hidden"
+                />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="rounded-md border border-[var(--line)] bg-[var(--panel)]">
+          <div className="border-b border-[var(--line)] p-4">
+            <h2 className="text-lg font-semibold">Recent uploads</h2>
+          </div>
+          <div className="space-y-3 p-4">
+            {runs.length ? (
+              runs.map((run) => (
+                <article key={run.id} className="rounded-md border border-[var(--line)] p-3 text-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <h3 className="font-medium">{run.file_name}</h3>
+                    <StatusBadge status={run.status} />
+                  </div>
+                  <p className="mt-1 text-xs text-[var(--muted)]">
+                    {run.chunk_count} chunks / {run.company_count} companies
+                  </p>
+                  {run.project_summary ? <p className="mt-2 line-clamp-3 text-[var(--muted)]">{run.project_summary}</p> : null}
+                  {run.error_message ? <p className="mt-2 text-[var(--warning)]">{run.error_message}</p> : null}
+                </article>
+              ))
+            ) : (
+              <p className="text-sm text-[var(--muted)]">No uploaded project files yet.</p>
+            )}
+          </div>
+        </section>
+      </aside>
     </div>
   );
+}
 
-  function updateCompany(key: keyof CompanyFormState, value: string) {
-    setCompanyForm((current) => ({ ...current, [key]: value }));
-  }
+function Metric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-md border border-[var(--line)] bg-white px-3 py-2 text-right">
+      <div className="font-semibold">{value}</div>
+      <div className="text-[var(--muted)]">{label}</div>
+    </div>
+  );
+}
+
+function CompanyCard({ company }: { company: LeadCompany | LeadMatch }) {
+  return (
+    <article className="rounded-md border border-[var(--line)] p-3 text-sm">
+      <div className="flex items-start justify-between gap-3">
+        <h4 className="font-semibold">{company.name}</h4>
+        {hasSimilarity(company) ? <span className="text-xs text-[var(--accent)]">{Math.round(company.similarity * 100)}%</span> : null}
+      </div>
+      <p className="mt-1 text-xs text-[var(--muted)]">{[company.industry, company.region].filter(Boolean).join(" / ")}</p>
+      <p className="mt-2 line-clamp-4 text-[var(--muted)]">{company.description}</p>
+      {company.services_fit.length ? (
+        <div className="mt-3 flex flex-wrap gap-1">
+          {company.services_fit.slice(0, 3).map((service) => (
+            <Badge key={service}>{service}</Badge>
+          ))}
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function EvidenceCard({ item }: { item: UploadedDocumentEvidence }) {
+  return (
+    <article className="rounded-md border border-[var(--line)] p-3 text-sm">
+      <div className="flex items-start justify-between gap-3">
+        <h4 className="font-semibold">{item.file_name}</h4>
+        <span className="text-xs text-[var(--accent)]">{Math.round(item.similarity * 100)}%</span>
+      </div>
+      <p className="mt-1 text-xs text-[var(--muted)]">
+        Chunk {item.chunk_index}
+        {typeof item.metadata.section === "string" ? ` / ${item.metadata.section}` : ""}
+      </p>
+      <p className="mt-2 line-clamp-4 text-[var(--muted)]">{item.content}</p>
+    </article>
+  );
+}
+
+function StatusBadge({ status }: { status: UploadRun["status"] }) {
+  const label = status === "completed" ? "Indexed" : status === "processing" ? "Processing" : "Failed";
+  return (
+    <span className={status === "failed" ? "text-xs text-[var(--warning)]" : "text-xs text-[var(--accent)]"}>
+      {label}
+    </span>
+  );
+}
+
+function Badge({ children }: { children: string }) {
+  return <span className="rounded-md border border-[var(--line)] px-2 py-1 text-xs text-[var(--muted)]">{children}</span>;
 }
 
 function hasSimilarity(company: LeadCompany | LeadMatch): company is LeadMatch {
   return "similarity" in company && typeof company.similarity === "number";
-}
-
-function Field({
-  label,
-  onChange,
-  required,
-  value,
-}: {
-  label: string;
-  onChange: (value: string) => void;
-  required?: boolean;
-  value: string;
-}) {
-  return (
-    <label className="block text-sm font-medium text-[var(--muted)]">
-      {label}
-      <input
-        required={required}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="mt-1 h-10 w-full rounded-md border border-[var(--line)] bg-white px-3 text-[var(--foreground)] outline-none focus:border-[var(--accent)]"
-      />
-    </label>
-  );
-}
-
-function TextArea({
-  label,
-  onChange,
-  required,
-  rows,
-  value,
-}: {
-  label: string;
-  onChange: (value: string) => void;
-  required?: boolean;
-  rows: number;
-  value: string;
-}) {
-  return (
-    <label className="block text-sm font-medium text-[var(--muted)]">
-      {label}
-      <textarea
-        required={required}
-        rows={rows}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="mt-1 w-full resize-y rounded-md border border-[var(--line)] bg-white p-3 text-[var(--foreground)] outline-none focus:border-[var(--accent)]"
-      />
-    </label>
-  );
 }

@@ -1,4 +1,4 @@
-import type { LeadCompany } from "./types";
+import type { LeadCompany, UploadedDocumentEvidence } from "./types";
 import type { KpmRagRecord, RagDocumentMatch } from "./rag-types";
 
 export function ragRecordToContent(record: KpmRagRecord) {
@@ -80,6 +80,21 @@ export function ragDocumentsToContext(matches: RagDocumentMatch[]) {
         match.trigger_name ? `Trigger: ${match.trigger_name}` : "",
         match.event_date ? `Date: ${match.event_date}` : "",
         `Verification: ${verificationLabel(match.metadata)}`,
+        `Content: ${match.content}`,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    )
+    .join("\n\n");
+}
+
+export function uploadedDocumentsToContext(matches: UploadedDocumentEvidence[]) {
+  return matches
+    .map((match, index) =>
+      [
+        `[U${index + 1}] ${match.file_name} (${Math.round(match.similarity * 100)}% semantic match)`,
+        `Chunk: ${match.chunk_index}`,
+        typeof match.metadata.section === "string" ? `Section: ${match.metadata.section}` : "",
         `Content: ${match.content}`,
       ]
         .filter(Boolean)

@@ -35,12 +35,25 @@ export type RagDocumentEvidence = {
   similarity: number;
 };
 
+export type UploadedDocumentEvidence = {
+  id: string;
+  source_document_id: string;
+  ingestion_run_id: string | null;
+  chunk_index: number;
+  content: string;
+  metadata: Record<string, unknown>;
+  file_name: string;
+  storage_path: string;
+  similarity: number;
+};
+
 export type LeadSearchResult = {
   id?: string;
   request: string;
   answer: string;
   matches: LeadMatch[];
   documents?: RagDocumentEvidence[];
+  uploadedDocuments?: UploadedDocumentEvidence[];
   model: string;
   embeddingModel: string;
 };
