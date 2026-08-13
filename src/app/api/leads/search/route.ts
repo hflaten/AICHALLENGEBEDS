@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { matchesToContext } from "@/lib/leads/format";
-import type { LeadMatch } from "@/lib/leads/types";
+import { ragDocumentsToContext } from "@/lib/leads/rag-format";
+import type { LeadMatch, RagDocumentEvidence } from "@/lib/leads/types";
 import { createEmbedding, createLeadBrief, getOpenAISettings } from "@/lib/openai/client";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
@@ -25,6 +26,16 @@ export async function POST(request: Request) {
   try {
     const supabase = getSupabaseAdmin();
     const queryEmbedding = await createEmbedding(parsed.data.request);
+    const { data: documentsData, error: documentsError } = await supabase.rpc("match_rag_documents", {
+      query_embedding: queryEmbedding,
+      match_threshold: Math.min(parsed.data.matchThreshold, 0.2),
+      match_count: Math.max(parsed.data.matchCount * 2, 12),
+    });
+
+    if (documentsError) {
+      return Response.json({ error: documentsError.message }, { status: 500 });
+    }
+
     const { data, error } = await supabase.rpc("match_lead_companies", {
       query_embedding: queryEmbedding,
       match_threshold: parsed.data.matchThreshold,
@@ -36,14 +47,15 @@ export async function POST(request: Request) {
     }
 
     const matches = (data || []) as LeadMatch[];
+    const documents = (documentsData || []) as RagDocumentEvidence[];
 
-    if (matches.length === 0) {
+    if (matches.length === 0 && documents.length === 0) {
       return Response.json({
         result: {
           request: parsed.data.request,
-          answer:
-            "No companies in the database passed the current semantic-match threshold. Add more company records or lower the threshold.",
+          answer: "No company or document records passed the current semantic-match threshold. Import the KPMG RAG corpus or lower the threshold.",
           matches: [],
+          documents: [],
           model: getOpenAISettings().model,
           embeddingModel: getOpenAISettings().embeddingModel,
         },
@@ -51,8 +63,14 @@ export async function POST(request: Request) {
     }
 
     const settings = getOpenAISettings();
+    const context = [
+      documents.length ? "Document evidence:\n" + ragDocumentsToContext(documents) : "",
+      matches.length ? "Company summaries:\n" + matchesToContext(matches) : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
     const answer = await createLeadBrief({
-      context: matchesToContext(matches),
+      context,
       request: parsed.data.request,
     });
 
@@ -67,6 +85,7 @@ export async function POST(request: Request) {
         metadata: {
           match_threshold: parsed.data.matchThreshold,
           match_count: parsed.data.matchCount,
+          matched_document_ids: documents.map((document) => document.id),
         },
       })
       .select("id")
@@ -82,6 +101,7 @@ export async function POST(request: Request) {
         request: parsed.data.request,
         answer,
         matches,
+        documents,
         model: settings.model,
         embeddingModel: settings.embeddingModel,
       },

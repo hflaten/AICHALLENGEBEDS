@@ -21,11 +21,26 @@ export type LeadMatch = LeadCompany & {
   similarity: number;
 };
 
+export type RagDocumentEvidence = {
+  id: string;
+  source_id: string;
+  doc_type: string;
+  company_name: string | null;
+  org_id: string | null;
+  sector: string | null;
+  trigger_name: string | null;
+  event_date: string | null;
+  content: string;
+  metadata: Record<string, unknown>;
+  similarity: number;
+};
+
 export type LeadSearchResult = {
   id?: string;
   request: string;
   answer: string;
   matches: LeadMatch[];
+  documents?: RagDocumentEvidence[];
   model: string;
   embeddingModel: string;
 };

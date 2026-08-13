@@ -27,10 +27,19 @@ export function getOpenAISettings() {
 }
 
 export async function createEmbedding(input: string) {
+  const [embedding] = await createEmbeddings([input]);
+  return embedding;
+}
+
+export async function createEmbeddings(inputs: string[]) {
   const settings = getOpenAISettings();
 
   if (!settings.apiKey) {
     throw new Error("OPENAI_API_KEY is not configured.");
+  }
+
+  if (inputs.length === 0) {
+    return [];
   }
 
   const response = await fetch(`${OPENAI_API_BASE}/embeddings`, {
@@ -41,7 +50,7 @@ export async function createEmbedding(input: string) {
     },
     body: JSON.stringify({
       model: settings.embeddingModel,
-      input,
+      input: inputs,
       dimensions: EMBEDDING_DIMENSIONS,
       encoding_format: "float",
     }),
@@ -53,13 +62,19 @@ export async function createEmbedding(input: string) {
     throw new Error(payload.error?.message || "OpenAI embedding request failed.");
   }
 
-  const embedding = payload.data?.[0]?.embedding;
+  const embeddings = payload.data?.map((item) => item.embedding);
 
-  if (!embedding || embedding.length !== EMBEDDING_DIMENSIONS) {
+  if (!embeddings || embeddings.length !== inputs.length) {
+    throw new Error("OpenAI embedding response did not match the input count.");
+  }
+
+  const invalidEmbedding = embeddings.find((embedding) => !embedding || embedding.length !== EMBEDDING_DIMENSIONS);
+
+  if (invalidEmbedding) {
     throw new Error(`Expected a ${EMBEDDING_DIMENSIONS}-dimension embedding.`);
   }
 
-  return embedding;
+  return embeddings as number[][];
 }
 
 export async function createLeadBrief({
@@ -98,9 +113,10 @@ export async function createLeadBrief({
               text:
                 [
                   "Role: You are KPMG's lead qualification assistant for shipping and logistics consultancy opportunities.",
-                  "Goal: Rank the retrieved company records against the user's lead request and create a practical outreach brief.",
-                  "Evidence rules: Use only the retrieved company records. Cite every company-specific claim with its record number, such as [1]. Do not invent companies, contacts, metrics, buying signals, needs, regions, or service fit.",
-                  "Success criteria: Recommend only companies with support in the retrieved records; explain why each fit matters to KPMG; state missing data or weak evidence; suggest one concrete next action per recommended company.",
+                  "Goal: Rank retrieved RAG evidence against the user's lead request and create a practical outreach brief.",
+                  "Evidence rules: Use only the retrieved records. Cite every company-specific claim with its record number, such as [1]. Do not invent companies, contacts, metrics, buying signals, needs, regions, dates, sources, or service fit.",
+                  "Trust rules: Treat records labeled production data and verified as strongest evidence. You may use synthetic demo, unverified, no-signal, methodology, definition, governance, or guardrail records, but label them clearly and never present them as verified market facts.",
+                  "Success criteria: Recommend only companies with retrieved support; explain why each fit matters to KPMG; state missing data or weak evidence; suggest one concrete next action per recommended company.",
                   "Output: Use sections named Top leads, Why these fit, Risks or missing evidence, and Next actions. If the records do not support a useful recommendation, say so directly and ask for more seed data instead of guessing.",
                 ].join("\n"),
             },

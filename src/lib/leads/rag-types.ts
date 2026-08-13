@@ -1,0 +1,51 @@
+export type KpmRagRecord = {
+  id: string;
+  type: string;
+  provenance?: string;
+  selskap?: string;
+  org_id?: string;
+  sektor?: string;
+  trigger?: string;
+  trigger_kode?: string;
+  trigger_familie?: string;
+  dato?: string;
+  dager_siden?: number | string;
+  vekt?: number | string;
+  kildenivaa?: string;
+  ferskhet?: number | string;
+  spraak?: string;
+  synonymer?: string[];
+  kilder?: Array<{
+    type?: string;
+    tittel?: string;
+    url?: string | null;
+    merknad?: string;
+    [key: string]: unknown;
+  }>;
+  text?: string;
+  questions?: string[];
+  modellversjon?: string;
+  vurderingsdato?: string;
+  verifisert?: boolean;
+  kilde_status?: string;
+  produksjonsdata?: boolean;
+  syntetisk_demo?: boolean;
+  halveringstid_dager?: number | string;
+  anbefalt_tjenester?: string[];
+  grunnbidrag?: number | string;
+  [key: string]: unknown;
+};
+
+export type RagDocumentMatch = {
+  id: string;
+  source_id: string;
+  doc_type: string;
+  company_name: string | null;
+  org_id: string | null;
+  sector: string | null;
+  trigger_name: string | null;
+  event_date: string | null;
+  content: string;
+  metadata: Record<string, unknown>;
+  similarity: number;
+};

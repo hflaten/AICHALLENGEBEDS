@@ -125,7 +125,7 @@ export function LeadWorkbench({ status }: { status: RuntimeStatus }) {
     }
   }
 
-  async function seedShippingCompanies() {
+  async function seedKpmRagCorpus() {
     if (!canUseRag || isSeeding) return;
 
     setIsSeeding(true);
@@ -133,18 +133,27 @@ export function LeadWorkbench({ status }: { status: RuntimeStatus }) {
     setMessage(null);
 
     try {
-      const response = await fetch("/api/companies/seed", {
+      const response = await fetch("/api/rag/seed", {
         method: "POST",
       });
-      const payload = (await response.json()) as { count?: number; error?: string };
-      if (!response.ok || typeof payload.count !== "number") {
-        throw new Error(payload.error || "Shipping seed failed.");
+      const payload = (await response.json()) as {
+        companies?: number;
+        count?: number;
+        error?: string;
+        productionRecords?: number;
+        syntheticRecords?: number;
+        verifiedRecords?: number;
+      };
+      if (!response.ok || typeof payload.count !== "number" || typeof payload.companies !== "number") {
+        throw new Error(payload.error || "KPMG RAG corpus import failed.");
       }
 
-      setMessage(`${payload.count} shipping companies were embedded and saved.`);
+      setMessage(
+        `${payload.count} RAG records and ${payload.companies} company summaries were embedded. ${payload.verifiedRecords || 0} verified, ${payload.productionRecords || 0} production, ${payload.syntheticRecords || 0} synthetic.`,
+      );
       await loadCompanies();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Shipping seed failed.");
+      setError(caught instanceof Error ? caught.message : "KPMG RAG corpus import failed.");
     } finally {
       setIsSeeding(false);
     }
@@ -187,10 +196,10 @@ export function LeadWorkbench({ status }: { status: RuntimeStatus }) {
           <button
             type="button"
             disabled={!canUseRag || isSeeding}
-            onClick={() => void seedShippingCompanies()}
+            onClick={() => void seedKpmRagCorpus()}
             className="h-10 w-full rounded-md border border-[var(--accent)] px-4 font-medium text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {isSeeding ? "Embedding 20 companies..." : "Load 20 shipping companies"}
+            {isSeeding ? "Embedding KPMG corpus..." : "Load KPMG RAG corpus"}
           </button>
         </div>
         <form onSubmit={saveCompany} className="space-y-3 p-4">
