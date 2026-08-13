@@ -19,6 +19,11 @@ export type LeadCompany = {
 
 export type LeadMatch = LeadCompany & {
   similarity: number;
+  dataset_score?: number | null;
+  production_score?: number | null;
+  score_status?: string | null;
+  score_rank?: number | null;
+  triggered_signals?: string[];
 };
 
 export type RagDocumentEvidence = {

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { matchesToContext } from "@/lib/leads/format";
 import { ragDocumentsToContext, uploadedDocumentsToContext } from "@/lib/leads/rag-format";
+import { kpmRagRecords } from "@/lib/leads/kpm-rag-data";
 import type { LeadMatch, RagDocumentEvidence, UploadedDocumentEvidence } from "@/lib/leads/types";
 import { createEmbedding, createLeadBrief, getOpenAISettings } from "@/lib/openai/client";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
@@ -56,7 +57,7 @@ export async function POST(request: Request) {
       return Response.json({ error: error.message }, { status: 500 });
     }
 
-    const matches = (data || []) as LeadMatch[];
+    const matches = enrichMatchesWithDatasetScores((data || []) as LeadMatch[]);
     const documents = (documentsData || []) as RagDocumentEvidence[];
     const uploadedDocuments = uploadedDocumentsError ? [] : ((uploadedDocumentsData || []) as UploadedDocumentEvidence[]);
 
@@ -136,4 +137,53 @@ function isMissingUploadSchemaError(message: string) {
     message.includes("document_chunks") ||
     message.includes("ingestion_runs")
   );
+}
+
+const companyScoreByName = new Map(
+  kpmRagRecords
+    .filter((record) => record.type === "company_score" && typeof record.selskap === "string")
+    .map((record) => [
+      normalizeCompanyName(record.selskap || ""),
+      {
+        dataset_score: readNumber(record.score),
+        production_score: readNumber(record.produksjonsscore),
+        score_status: typeof record.score_status === "string" ? record.score_status : null,
+        score_rank: readNumber(record.rang),
+        triggered_signals: Array.isArray(record["utløste_triggere"])
+          ? record["utløste_triggere"].filter((value): value is string => typeof value === "string")
+          : [],
+      },
+    ]),
+);
+
+function enrichMatchesWithDatasetScores(matches: LeadMatch[]) {
+  return matches
+    .map((match) => {
+      const score = companyScoreByName.get(normalizeCompanyName(match.name));
+      return score ? { ...match, ...score } : match;
+    })
+    .sort((left, right) => {
+      const leftRank = left.score_rank ?? Number.POSITIVE_INFINITY;
+      const rightRank = right.score_rank ?? Number.POSITIVE_INFINITY;
+      if (leftRank !== rightRank) return leftRank - rightRank;
+
+      const leftScore = left.dataset_score ?? Number.NEGATIVE_INFINITY;
+      const rightScore = right.dataset_score ?? Number.NEGATIVE_INFINITY;
+      if (leftScore !== rightScore) return rightScore - leftScore;
+
+      return right.similarity - left.similarity;
+    });
+}
+
+function normalizeCompanyName(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function readNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
 }

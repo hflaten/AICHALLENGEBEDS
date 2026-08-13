@@ -30,7 +30,13 @@ export function matchesToContext(matches: LeadMatch[]) {
   return matches
     .map((match, index) =>
       [
-        `[${index + 1}] ${match.name} (${Math.round(match.similarity * 100)}% semantic match)`,
+        `[${index + 1}] ${match.name}`,
+        typeof match.dataset_score === "number" ? `Dataset lead score: ${match.dataset_score}` : "",
+        typeof match.production_score === "number" ? `Production score: ${match.production_score}` : "",
+        match.score_status ? `Score status: ${match.score_status}` : "",
+        typeof match.score_rank === "number" ? `Dataset rank: ${match.score_rank}` : "",
+        match.triggered_signals?.length ? `Triggered score signals: ${match.triggered_signals.join("; ")}` : "",
+        `${Math.round(match.similarity * 100)}% semantic retrieval match`,
         match.website ? `Website: ${match.website}` : "",
         match.industry ? `Industry: ${match.industry}` : "",
         match.region ? `Region: ${match.region}` : "",

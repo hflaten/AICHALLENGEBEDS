@@ -409,13 +409,22 @@ function RecommendationCard({
             {[company.industry, company.region, company.company_size].filter(Boolean).join(" / ")}
           </p>
         </div>
-        <div className="min-w-24 rounded-md border border-[var(--line)] px-3 py-2 text-right">
-          <div className="text-lg font-semibold text-[var(--accent)]">{Math.round(company.similarity * 100)}%</div>
-          <div className="text-xs text-[var(--muted)]">RAG match</div>
+        <div className="min-w-32 rounded-md border border-[var(--line)] px-3 py-2 text-right">
+          <div className="text-lg font-semibold text-[var(--accent)]">{formatLeadScore(company)}</div>
+          <div className="text-xs text-[var(--muted)]">{company.dataset_score == null ? "Semantic match" : "Dataset score"}</div>
+          {company.score_status ? <div className="mt-1 text-[10px] uppercase tracking-[0.12em] text-[var(--muted)]">{company.score_status}</div> : null}
         </div>
       </div>
 
       <p className="mt-4 text-sm leading-6 text-[var(--foreground)]">{company.description}</p>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        {typeof company.score_rank === "number" ? <Badge>{`Dataset rank #${company.score_rank}`}</Badge> : null}
+        <Badge>{`${Math.round(company.similarity * 100)}% semantic match`}</Badge>
+        {company.triggered_signals?.slice(0, 5).map((signal) => (
+          <Badge key={signal}>{signal}</Badge>
+        ))}
+      </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-3">
         <SignalList title="Buying signals" items={company.buying_signals} />
@@ -523,4 +532,9 @@ function EmptyState({ children }: { children: ReactNode }) {
 function evidenceMatchesCompany(item: RagDocumentEvidence | UploadedDocumentEvidence, companyName: string) {
   const haystack = "company_name" in item ? `${item.company_name || ""} ${item.content}` : item.content;
   return haystack.toLowerCase().includes(companyName.toLowerCase());
+}
+
+function formatLeadScore(company: LeadMatch) {
+  if (typeof company.dataset_score === "number") return company.dataset_score.toFixed(1);
+  return `${Math.round(company.similarity * 100)}%`;
 }
