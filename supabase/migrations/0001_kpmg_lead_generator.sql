@@ -111,3 +111,5 @@ $$;
 
 revoke execute on function public.match_lead_companies(extensions.vector, float, int) from anon, authenticated;
 grant execute on function public.match_lead_companies(extensions.vector, float, int) to service_role;
+
+notify pgrst, 'reload schema';
