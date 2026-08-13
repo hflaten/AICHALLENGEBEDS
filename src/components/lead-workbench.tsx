@@ -1,7 +1,8 @@
 "use client";
 
 import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import type { LeadCompany, LeadMatch, LeadSearchResult, UploadedDocumentEvidence } from "@/lib/leads/types";
+import type { ReactNode } from "react";
+import type { LeadCompany, LeadMatch, LeadSearchResult, RagDocumentEvidence, UploadedDocumentEvidence } from "@/lib/leads/types";
 
 type RuntimeStatus = {
   aiReady: boolean;
@@ -156,8 +157,9 @@ export function LeadWorkbench({ status }: { status: RuntimeStatus }) {
     if (event.target.files) void uploadFiles(event.target.files);
   }
 
-  const displayedMatches = result?.matches.length ? result.matches : companies;
   const uploadedEvidence = result?.uploadedDocuments || [];
+  const corpusEvidence = result?.documents || [];
+  const evidenceCount = uploadedEvidence.length + corpusEvidence.length;
 
   return (
     <div className="grid flex-1 gap-5 py-5 xl:grid-cols-[minmax(0,1fr)_340px]">
@@ -205,67 +207,73 @@ export function LeadWorkbench({ status }: { status: RuntimeStatus }) {
           </div>
         </form>
 
-        <div className="grid flex-1 gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="min-h-96 rounded-md border border-[var(--line)] p-4">
-            {result ? (
-              <div>
-                <div className="mb-4 flex flex-wrap gap-2 text-xs text-[var(--muted)]">
-                  <Badge>{result.model}</Badge>
-                  <Badge>{result.embeddingModel}</Badge>
-                  <Badge>{`${result.matches.length} companies`}</Badge>
-                  <Badge>{`${(result.documents?.length || 0) + uploadedEvidence.length} evidence records`}</Badge>
-                </div>
-                <div className="whitespace-pre-wrap text-sm leading-7">{result.answer}</div>
-              </div>
-            ) : (
-              <div className="grid h-full place-items-center text-center text-sm text-[var(--muted)]">
-                <p className="max-w-md">
-                  Upload prior project files or use the existing corpus, then describe the lead profile KPMG wants to find.
-                </p>
-              </div>
-            )}
-          </div>
-
-          <aside>
-            <div className="flex items-center justify-between gap-3">
-              <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">Ranked leads</h3>
-              <button
-                type="button"
-                disabled={!status.supabaseReady}
-                onClick={() => void refreshKnowledge()}
-                className="rounded-md border border-[var(--line)] px-2 py-1 text-xs font-medium text-[var(--muted)] disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Refresh
-              </button>
-            </div>
-            <div className="mt-3 space-y-3">
-              {displayedMatches.slice(0, 7).map((company) => (
-                <CompanyCard key={company.id} company={company} />
-              ))}
-            </div>
-          </aside>
-        </div>
-
-        {result ? (
-          <div className="border-t border-[var(--line)] p-4">
-            <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">Source evidence</h3>
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
-              {uploadedEvidence.slice(0, 4).map((item) => (
-                <EvidenceCard key={item.id} item={item} />
-              ))}
-              {(result.documents || []).slice(0, Math.max(0, 4 - uploadedEvidence.length)).map((item) => (
-                <article key={item.id} className="rounded-md border border-[var(--line)] p-3 text-sm">
-                  <div className="flex items-start justify-between gap-3">
-                    <h4 className="font-semibold">{item.company_name || item.doc_type}</h4>
-                    <span className="text-xs text-[var(--accent)]">{Math.round(item.similarity * 100)}%</span>
+        <div className="flex-1 p-4">
+          {result ? (
+            <div className="space-y-4">
+              <section className="rounded-md border border-[var(--line)] bg-[#fbfcfd] p-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">AI brief</p>
+                    <h3 className="mt-1 text-xl font-semibold">Lead recommendations</h3>
                   </div>
-                  <p className="mt-1 text-xs text-[var(--muted)]">{[item.doc_type, item.trigger_name].filter(Boolean).join(" / ")}</p>
-                  <p className="mt-2 line-clamp-4 text-[var(--muted)]">{item.content}</p>
-                </article>
-              ))}
+                  <div className="flex flex-wrap gap-2">
+                    <Badge>{result.model}</Badge>
+                    <Badge>{result.embeddingModel}</Badge>
+                    <Badge>{`${result.matches.length} companies`}</Badge>
+                    <Badge>{`${evidenceCount} evidence records`}</Badge>
+                  </div>
+                </div>
+                <AnswerBrief answer={result.answer} />
+              </section>
+
+              <section>
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">Recommended companies</h3>
+                  <button
+                    type="button"
+                    disabled={!status.supabaseReady}
+                    onClick={() => void refreshKnowledge()}
+                    className="rounded-md border border-[var(--line)] px-3 py-2 text-sm font-medium text-[var(--muted)] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Refresh
+                  </button>
+                </div>
+                <div className="mt-3 grid gap-3">
+                  {result.matches.length ? (
+                    result.matches.map((company, index) => (
+                      <RecommendationCard
+                        key={company.id}
+                        company={company}
+                        rank={index + 1}
+                        evidence={[...uploadedEvidence, ...corpusEvidence].filter((item) => evidenceMatchesCompany(item, company.name)).slice(0, 2)}
+                      />
+                    ))
+                  ) : (
+                    <EmptyState>No companies matched this request. Try broadening the geography, sector, or trigger criteria.</EmptyState>
+                  )}
+                </div>
+              </section>
+
+              {evidenceCount ? (
+                <section>
+                  <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">Evidence library</h3>
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    {uploadedEvidence.slice(0, 4).map((item) => (
+                      <EvidenceCard key={item.id} item={item} />
+                    ))}
+                    {corpusEvidence.slice(0, Math.max(0, 6 - uploadedEvidence.length)).map((item) => (
+                      <CorpusEvidenceCard key={item.id} item={item} />
+                    ))}
+                  </div>
+                </section>
+              ) : null}
             </div>
-          </div>
-        ) : null}
+          ) : (
+            <EmptyState>
+              Upload prior project files or use the existing corpus, then describe the lead profile KPMG wants to find.
+            </EmptyState>
+          )}
+        </div>
       </section>
 
       <aside className="space-y-5">
@@ -354,23 +362,95 @@ function Metric({ label, value }: { label: string; value: number }) {
   );
 }
 
-function CompanyCard({ company }: { company: LeadCompany | LeadMatch }) {
+function AnswerBrief({ answer }: { answer: string }) {
+  const lines = answer
+    .replaceAll("**", "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const summaryLines = lines
+    .filter((line) => !line.startsWith("##") && !line.match(/^\d+\./) && !line.startsWith("-"))
+    .slice(0, 3);
+
   return (
-    <article className="rounded-md border border-[var(--line)] p-3 text-sm">
-      <div className="flex items-start justify-between gap-3">
-        <h4 className="font-semibold">{company.name}</h4>
-        {hasSimilarity(company) ? <span className="text-xs text-[var(--accent)]">{Math.round(company.similarity * 100)}%</span> : null}
+    <div className="mt-4 space-y-3 text-sm leading-6 text-[var(--foreground)]">
+      {summaryLines.length ? (
+        summaryLines.map((line, index) => <p key={`${line}-${index}`}>{line}</p>)
+      ) : (
+        <p>
+          RAG identified the companies below as the strongest matches for the request. Each recommendation is grounded in saved company
+          summaries and source evidence.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function RecommendationCard({
+  company,
+  evidence,
+  rank,
+}: {
+  company: LeadMatch;
+  evidence: Array<RagDocumentEvidence | UploadedDocumentEvidence>;
+  rank: number;
+}) {
+  return (
+    <article className="rounded-md border border-[var(--line)] bg-white p-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="grid h-7 w-7 place-items-center rounded-md bg-[var(--foreground)] text-xs font-semibold text-white">
+              {rank}
+            </span>
+            <h4 className="text-lg font-semibold">{company.name}</h4>
+          </div>
+          <p className="mt-2 text-sm text-[var(--muted)]">
+            {[company.industry, company.region, company.company_size].filter(Boolean).join(" / ")}
+          </p>
+        </div>
+        <div className="min-w-24 rounded-md border border-[var(--line)] px-3 py-2 text-right">
+          <div className="text-lg font-semibold text-[var(--accent)]">{Math.round(company.similarity * 100)}%</div>
+          <div className="text-xs text-[var(--muted)]">RAG match</div>
+        </div>
       </div>
-      <p className="mt-1 text-xs text-[var(--muted)]">{[company.industry, company.region].filter(Boolean).join(" / ")}</p>
-      <p className="mt-2 line-clamp-4 text-[var(--muted)]">{company.description}</p>
-      {company.services_fit.length ? (
-        <div className="mt-3 flex flex-wrap gap-1">
-          {company.services_fit.slice(0, 3).map((service) => (
-            <Badge key={service}>{service}</Badge>
-          ))}
+
+      <p className="mt-4 text-sm leading-6 text-[var(--foreground)]">{company.description}</p>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <SignalList title="Buying signals" items={company.buying_signals} />
+        <SignalList title="Pain points" items={company.pain_points} />
+        <SignalList title="KPMG fit" items={company.services_fit} />
+      </div>
+
+      {evidence.length ? (
+        <div className="mt-4 border-t border-[var(--line)] pt-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">Supporting evidence</p>
+          <div className="mt-2 grid gap-2 md:grid-cols-2">
+            {evidence.map((item) => (
+              <EvidenceSnippet key={item.id} item={item} />
+            ))}
+          </div>
         </div>
       ) : null}
     </article>
+  );
+}
+
+function SignalList({ items, title }: { items: string[]; title: string }) {
+  return (
+    <div className="rounded-md border border-[var(--line)] bg-[#fbfcfd] p-3">
+      <h5 className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">{title}</h5>
+      {items.length ? (
+        <ul className="mt-2 space-y-2 text-sm leading-5">
+          {items.slice(0, 3).map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-2 text-sm text-[var(--muted)]">No structured signal available.</p>
+      )}
+    </div>
   );
 }
 
@@ -390,6 +470,35 @@ function EvidenceCard({ item }: { item: UploadedDocumentEvidence }) {
   );
 }
 
+function CorpusEvidenceCard({ item }: { item: RagDocumentEvidence }) {
+  return (
+    <article className="rounded-md border border-[var(--line)] p-3 text-sm">
+      <div className="flex items-start justify-between gap-3">
+        <h4 className="font-semibold">{item.company_name || item.doc_type}</h4>
+        <span className="text-xs text-[var(--accent)]">{Math.round(item.similarity * 100)}%</span>
+      </div>
+      <p className="mt-1 text-xs text-[var(--muted)]">{[item.doc_type, item.trigger_name].filter(Boolean).join(" / ")}</p>
+      <p className="mt-2 line-clamp-4 text-[var(--muted)]">{item.content}</p>
+    </article>
+  );
+}
+
+function EvidenceSnippet({ item }: { item: RagDocumentEvidence | UploadedDocumentEvidence }) {
+  const label = "file_name" in item ? item.file_name : item.company_name || item.doc_type;
+  const detail = "file_name" in item ? `Uploaded document / chunk ${item.chunk_index}` : [item.doc_type, item.trigger_name].filter(Boolean).join(" / ");
+
+  return (
+    <div className="rounded-md border border-[var(--line)] p-3 text-sm">
+      <div className="flex items-start justify-between gap-3">
+        <p className="font-medium">{label}</p>
+        <span className="text-xs text-[var(--accent)]">{Math.round(item.similarity * 100)}%</span>
+      </div>
+      <p className="mt-1 text-xs text-[var(--muted)]">{detail}</p>
+      <p className="mt-2 line-clamp-3 text-[var(--muted)]">{item.content}</p>
+    </div>
+  );
+}
+
 function StatusBadge({ status }: { status: UploadRun["status"] }) {
   const label = status === "completed" ? "Indexed" : status === "processing" ? "Processing" : "Failed";
   return (
@@ -403,6 +512,15 @@ function Badge({ children }: { children: string }) {
   return <span className="rounded-md border border-[var(--line)] px-2 py-1 text-xs text-[var(--muted)]">{children}</span>;
 }
 
-function hasSimilarity(company: LeadCompany | LeadMatch): company is LeadMatch {
-  return "similarity" in company && typeof company.similarity === "number";
+function EmptyState({ children }: { children: ReactNode }) {
+  return (
+    <div className="grid min-h-80 place-items-center rounded-md border border-dashed border-[var(--line)] bg-[#fbfcfd] p-8 text-center text-sm leading-6 text-[var(--muted)]">
+      <p className="max-w-md">{children}</p>
+    </div>
+  );
+}
+
+function evidenceMatchesCompany(item: RagDocumentEvidence | UploadedDocumentEvidence, companyName: string) {
+  const haystack = "company_name" in item ? `${item.company_name || ""} ${item.content}` : item.content;
+  return haystack.toLowerCase().includes(companyName.toLowerCase());
 }
